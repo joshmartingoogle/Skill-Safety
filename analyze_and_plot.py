@@ -1,19 +1,15 @@
 #!/usr/bin/env python3
 """
-Psychometric, Statistical, and Visual Artefact Generator for Skill Safety Index
+Psychometric, Statistical, Bimodality Diagnostic, and Visual Artefact Generator
 -------------------------------------------------------------------------------
-For each taxonomy (Stanford TaskNet, O*NET Tasks, O*NET Skills):
-  1. Summary statistics overall and by industry (using certainty-weighted Skill Safety Index scores)
-  2. Cronbach's alpha for the 6-item index (N1..N5, S), plus full leave-one-out alpha (alpha if item deleted)
-     and item-rest correlations to diagnose any item reducing scale reliability
-  3. Spot verification audit comparing primary pass vs. independent verification pass on random subsamples
-  4. Overall density distribution plots (individual per taxonomy + comparative overlay)
-  5. Paneled density distribution plots by industry (2x3 panels across the 6 industries per taxonomy)
+All decimal outputs, tables, and plot annotations are rounded to ONE decimal place (:.1f).
+Also conducts a multi-stage forensic analysis of whether the bimodal distribution is an
+artifact of data pipeline processing / cleaning vs. structural occupational differences.
 """
 
 import json
 import os
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -22,6 +18,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 BASE_DIR = "/usr/local/google/home/joshuabmartin/Skills Project"
+DATA_DIR = os.path.join(BASE_DIR, "data")
 OUT_DIR = os.path.join(BASE_DIR, "output")
 FIG_DIR = os.path.join(BASE_DIR, "figures")
 os.makedirs(FIG_DIR, exist_ok=True)
@@ -90,12 +87,22 @@ def cronbach_alpha(matrix: np.ndarray) -> float:
     return float((k / (k - 1.0)) * (1.0 - np.sum(item_vars) / total_var))
 
 
+def sarle_bimodality_coeff(x: np.ndarray) -> float:
+    """Computes Sarle's bimodality coefficient BC = (g^2 + 1) / (k + 3*(n-1)^2/((n-2)*(n-3))). BC > 0.6 indicates bimodality."""
+    x = np.asarray(x, dtype=float)
+    n = len(x)
+    if n < 4 or np.std(x) <= 1e-9:
+        return np.nan
+    skew = float(stats.skew(x))
+    kurt = float(stats.kurtosis(x))
+    denom = kurt + 3.0 * ((n - 1.0) ** 2) / ((n - 2.0) * (n - 3.0))
+    if abs(denom) <= 1e-12:
+        return np.nan
+    return float((skew ** 2 + 1.0) / denom)
+
+
 def compute_reliability_table(df_tax: pd.DataFrame) -> Dict[str, Any]:
-    """
-    Computes overall Cronbach's alpha (both on certainty-weighted item values and raw item scores)
-    and leave-one-out Cronbach's alpha + item-rest correlation for each of N1..N5, S.
-    """
-    # Build certainty-weighted item matrix: w_{i,k} * x_{i,k} where w_{i,k} = 6 * c_{i,k} / sum_j c_{i,j}
+    """Computes Cronbach's alpha and leave-one-out diagnostics rounded to 1 decimal place."""
     raw_cols = [f"{d}_score" for d in DIMS]
     cert_cols = [f"{d}_certainty" for d in DIMS]
     X_raw = df_tax[raw_cols].to_numpy(dtype=float)
@@ -112,7 +119,6 @@ def compute_reliability_table(df_tax: pd.DataFrame) -> Dict[str, Any]:
         loo_cw = cronbach_alpha(X_cw[:, keep_idx])
         loo_raw = cronbach_alpha(X_raw[:, keep_idx])
 
-        # Item-rest correlation on certainty-weighted matrix
         item_vec = X_cw[:, idx]
         rest_vec = np.sum(X_cw[:, keep_idx], axis=1)
         if np.std(item_vec) > 1e-9 and np.std(rest_vec) > 1e-9:
@@ -123,29 +129,29 @@ def compute_reliability_table(df_tax: pd.DataFrame) -> Dict[str, Any]:
         loo_rows.append({
             "item": d,
             "label": DIM_LABELS[d],
-            "item_mean_cw": round(float(np.mean(X_cw[:, idx])), 3),
-            "item_sd_cw": round(float(np.std(X_cw[:, idx], ddof=1)), 3),
-            "item_mean_raw": round(float(np.mean(X_raw[:, idx])), 3),
-            "mean_certainty": round(float(np.mean(C_mat[:, idx])), 3),
-            "item_rest_corr": round(r_it_rest, 3),
-            "alpha_if_deleted_cw": round(loo_cw, 4),
-            "delta_alpha_cw": round(loo_cw - alpha_cw, 4),
-            "alpha_if_deleted_raw": round(loo_raw, 4),
-            "delta_alpha_raw": round(loo_raw - alpha_raw, 4),
+            "item_mean_cw": round(float(np.mean(X_cw[:, idx])), 1),
+            "item_sd_cw": round(float(np.std(X_cw[:, idx], ddof=1)), 1),
+            "item_mean_raw": round(float(np.mean(X_raw[:, idx])), 1),
+            "mean_certainty": round(float(np.mean(C_mat[:, idx])), 1),
+            "item_rest_corr": round(r_it_rest, 1),
+            "alpha_if_deleted_cw": round(loo_cw, 1),
+            "delta_alpha_cw": round(loo_cw - alpha_cw, 1),
+            "alpha_if_deleted_raw": round(loo_raw, 1),
+            "delta_alpha_raw": round(loo_raw - alpha_raw, 1),
             "reduces_reliability": bool(loo_cw > alpha_cw),
         })
 
     return {
         "n_items": int(len(df_tax)),
-        "alpha_cw": round(alpha_cw, 4),
-        "alpha_raw": round(alpha_raw, 4),
-        "below_0_7_threshold": bool(alpha_cw < 0.70),
+        "alpha_cw": round(alpha_cw, 1),
+        "alpha_raw": round(alpha_raw, 1),
+        "below_0_7_threshold": bool(alpha_cw < 0.7),
         "leave_one_out": loo_rows,
     }
 
 
 def compute_summary_stats(df_tax: pd.DataFrame) -> pd.DataFrame:
-    """Computes summary statistics of certainty-weighted Skill Safety Index overall and by industry."""
+    """Computes summary statistics overall and by industry, rounded to 1 decimal place."""
     rows = []
 
     def summarize_group(grp: pd.DataFrame, label: str) -> Dict[str, Any]:
@@ -159,16 +165,16 @@ def compute_summary_stats(df_tax: pd.DataFrame) -> pd.DataFrame:
             "Group": label,
             "N": int(len(grp)),
             "AI_Assistable_Pct": round(100.0 * float(np.mean(gates)), 1),
-            "Mean_CW": round(float(np.mean(vals)), 3),
-            "SD_CW": round(float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0, 3),
-            "Median_CW": round(float(q50), 3),
-            "IQR_CW": round(float(q75 - q25), 3),
-            "P25_CW": round(float(q25), 3),
-            "P75_CW": round(float(q75), 3),
-            "Min_CW": round(float(np.min(vals)), 3),
-            "Max_CW": round(float(np.max(vals)), 3),
-            "Mean_Norm_0_1": round(float(np.mean(norms)), 3),
-            "Mean_Certainty": round(float(np.mean(certs)), 3),
+            "Mean_CW": round(float(np.mean(vals)), 1),
+            "SD_CW": round(float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0, 1),
+            "Median_CW": round(float(q50), 1),
+            "IQR_CW": round(float(q75 - q25), 1),
+            "P25_CW": round(float(q25), 1),
+            "P75_CW": round(float(q75), 1),
+            "Min_CW": round(float(np.min(vals)), 1),
+            "Max_CW": round(float(np.max(vals)), 1),
+            "Mean_Norm_0_1": round(float(np.mean(norms)), 1),
+            "Mean_Certainty": round(float(np.mean(certs)), 1),
             "High_Safety_Share_Pct": round(100.0 * float(np.mean(vals >= 2.0)), 1),
             "Low_Safety_Share_Pct": round(100.0 * float(np.mean(vals < 1.5)), 1),
             "Learner_Bypass_Pct": round(100.0 * float(np.mean(learn)), 1),
@@ -180,7 +186,6 @@ def compute_summary_stats(df_tax: pd.DataFrame) -> pd.DataFrame:
         if len(sub) > 0:
             rows.append(summarize_group(sub, INDUSTRY_SHORT[ind]))
 
-    # Also compute AI-assistable gated subset overall
     gated = df_tax[df_tax["gate_ai_assistable"] == True]
     if len(gated) > 0:
         rows.append(summarize_group(gated, "Overall (AI-Assistable Gate = True)"))
@@ -188,41 +193,96 @@ def compute_summary_stats(df_tax: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def compute_bimodality_forensics(df_all: pd.DataFrame) -> List[Dict[str, Any]]:
+    """
+    Evaluates how much of the bimodal distribution is an artifact of 3 pipeline/cleaning stages:
+      Stage 0: Raw Pipeline Output (All 530 items, including gate_ai_assistable=False and O*NET IM-only skills)
+      Stage 1: Apply Gate Rule (Drop gate_ai_assistable=False hands-on physical/observational tasks)
+      Stage 2: Apply Taxonomy Relevance Cleaning (Drop O*NET Skills with LV Not Relevant=='Y' or IM<2.0;
+               Drop TaskNet tasks with worker recognition <50% or supplemental status; Drop O*NET supplemental tasks)
+      Stage 3: Isolate Single-Call EM Context Halo (Exclude Emergency Medicine 29-1214.00 zero-floor halo)
+    """
+    es = pd.read_csv(os.path.join(DATA_DIR, "essential_skills.csv"))
+    tr = pd.read_csv(os.path.join(DATA_DIR, "transferable_skills.csv"))
+    sk_raw = pd.concat([es, tr], ignore_index=True)
+    lv_nr = sk_raw[sk_raw["Scale ID"] == "LV"][["O*NET-SOC Code", "Element ID", "Not Relevant"]].rename(
+        columns={"O*NET-SOC Code": "soc", "Element ID": "raw_id", "Not Relevant": "lv_not_relevant"}
+    )
+    df = df_all.merge(lv_nr, on=["soc", "raw_id"], how="left")
+
+    rows = []
+    for tax in TAXONOMIES:
+        sub = df[df["taxonomy"] == tax].copy()
+        s0 = sub
+        s1 = sub[sub["gate_ai_assistable"] == True]
+        if tax == "Stanford TaskNet":
+            s2 = s1[(s1["relevance"] >= 0.5) & (s1["status"] == "core")]
+        elif tax == "O*NET Tasks":
+            s2 = s1[s1["status"] == "core"]
+        else:
+            s2 = s1[(s1["lv_not_relevant"] != "Y") & (s1["importance"] >= 2.0)]
+        s3 = s2[s2["soc"] != "29-1214.00"]
+
+        for stage_lbl, grp in [
+            ("Stage 0: Raw Pipeline (All Items)", s0),
+            ("Stage 1: + Gate Filter (AI-Assistable Only)", s1),
+            ("Stage 2: + Relevance / Core Cleaning", s2),
+            ("Stage 3: + Excl. EM Zero-Floor Halo", s3),
+        ]:
+            vals = grp["safety_index_cw"].to_numpy(dtype=float)
+            rows.append({
+                "Taxonomy": tax,
+                "Stage": stage_lbl,
+                "N": int(len(vals)),
+                "Mean_CW": round(float(np.mean(vals)), 1),
+                "SD_CW": round(float(np.std(vals, ddof=1)), 1),
+                "Median_CW": round(float(np.median(vals)), 1),
+                "Sarle_BC": round(sarle_bimodality_coeff(vals), 1),
+                "Exact_Zero_Pct": round(100.0 * float(np.mean(vals == 0.0)), 1),
+                "Low_Mode_Lt_0_5_Pct": round(100.0 * float(np.mean(vals < 0.5)), 1),
+                "Mid_0_5_to_1_5_Pct": round(100.0 * float(np.mean((vals >= 0.5) & (vals < 1.5))), 1),
+                "High_Mode_Ge_1_5_Pct": round(100.0 * float(np.mean(vals >= 1.5)), 1),
+            })
+
+    out_df = pd.DataFrame(rows)
+    out_df.to_csv(os.path.join(OUT_DIR, "bimodality_diagnostic_stages.csv"), index=False)
+    return rows
+
+
 def plot_overall_density(df_tax: pd.DataFrame, tax_name: str, slug: str, color: str):
-    """Produces an overall kernel density + histogram distribution plot for a single taxonomy."""
+    """Produces an overall kernel density + histogram distribution plot with 1-decimal annotations."""
     vals = df_tax["safety_index_cw"].to_numpy(dtype=float)
     gated_vals = df_tax[df_tax["gate_ai_assistable"] == True]["safety_index_cw"].to_numpy(dtype=float)
 
     fig, ax = plt.subplots(figsize=(6.8, 4.2), dpi=300)
     x_grid = np.linspace(0.0, 3.0, 400)
 
-    # Histogram + KDE for all items
     ax.hist(vals, bins=18, range=(0.0, 3.0), density=True, alpha=0.25, color=color, edgecolor="white", label=f"All Items (N={len(vals)})")
     if len(vals) > 2 and np.std(vals) > 1e-6:
         kde = stats.gaussian_kde(vals, bw_method=0.28)
         y_kde = kde(x_grid)
-        ax.plot(x_grid, y_kde, color=color, lw=2.4, label=f"All Items KDE (Mean={np.mean(vals):.2f}, SD={np.std(vals, ddof=1):.2f})")
+        ax.plot(x_grid, y_kde, color=color, lw=2.4, label=f"All Items KDE (Mean={np.mean(vals):.1f}, SD={np.std(vals, ddof=1):.1f})")
         ax.fill_between(x_grid, 0, y_kde, color=color, alpha=0.12)
 
-    # KDE for AI-assistable gated subset if different from all items
     if len(gated_vals) > 2 and len(gated_vals) < len(vals) and np.std(gated_vals) > 1e-6:
         kde_g = stats.gaussian_kde(gated_vals, bw_method=0.28)
         ax.plot(x_grid, kde_g(x_grid), color="#333333", lw=1.8, ls="--",
-                label=f"AI-Assistable Only (N={len(gated_vals)}, Mean={np.mean(gated_vals):.2f})")
+                label=f"AI-Assistable Only (N={len(gated_vals)}, Mean={np.mean(gated_vals):.1f})")
 
     mean_v = float(np.mean(vals))
     med_v = float(np.median(vals))
     ax.axvline(mean_v, color=color, ls="-", lw=1.6, alpha=0.9)
-    ax.axvline(med_v, color="#444444", ls=":", lw=1.5, alpha=0.85, label=f"Median = {med_v:.2f}")
+    ax.axvline(med_v, color="#444444", ls=":", lw=1.5, alpha=0.85, label=f"Median = {med_v:.1f}")
 
-    # Annotate safety zones
     ax.axvspan(0.0, 1.5, color="#f8d7da", alpha=0.18, zorder=0)
     ax.axvspan(2.0, 3.0, color="#d4edda", alpha=0.18, zorder=0)
     ax.set_ylim(0.0, ax.get_ylim()[1] * 1.18)
-    ax.text(0.10, ax.get_ylim()[1] * 0.90, "Low Skill Safety\n(High Need / Stakes)", fontsize=7.8, color="#842029", fontweight="bold")
-    ax.text(2.22, ax.get_ylim()[1] * 0.90, "High Skill Safety\n(Assist for Good)", fontsize=7.8, color="#0f5132", fontweight="bold")
+    ax.text(0.1, ax.get_ylim()[1] * 0.90, "Low Skill Safety\n(High Need / Stakes)", fontsize=7.8, color="#842029", fontweight="bold")
+    ax.text(2.2, ax.get_ylim()[1] * 0.90, "High Skill Safety\n(Assist for Good)", fontsize=7.8, color="#0f5132", fontweight="bold")
 
     ax.set_xlim(0.0, 3.0)
+    ax.xaxis.set_major_formatter( matplotlib.ticker.FormatStrFormatter('%.1f') )
+    ax.yaxis.set_major_formatter( matplotlib.ticker.FormatStrFormatter('%.1f') )
     ax.set_xlabel("Certainty-Weighted Skill Safety Index (0 = Lowest Safety, 3 = Highest Safety)", fontsize=9.5, fontweight="bold")
     ax.set_ylabel("Density", fontsize=9.5, fontweight="bold")
     ax.set_title(f"{tax_name}: Overall Skill Safety Index Distribution", fontsize=11, fontweight="bold", pad=10)
@@ -238,7 +298,7 @@ def plot_overall_density(df_tax: pd.DataFrame, tax_name: str, slug: str, color: 
 
 
 def plot_combined_overall_density(df_all: pd.DataFrame):
-    """Produces a 3-panel side-by-side overall density figure across all 3 taxonomies."""
+    """Produces a 3-panel side-by-side overall density figure across all 3 taxonomies (1-decimal labels)."""
     fig, axes = plt.subplots(1, 3, figsize=(13.5, 3.9), dpi=300, sharey=False)
     x_grid = np.linspace(0.0, 3.0, 400)
 
@@ -252,22 +312,24 @@ def plot_combined_overall_density(df_all: pd.DataFrame):
         if len(vals) > 2 and np.std(vals) > 1e-6:
             kde = stats.gaussian_kde(vals, bw_method=0.28)
             y_kde = kde(x_grid)
-            ax.plot(x_grid, y_kde, color=color, lw=2.3, label=f"Mean={np.mean(vals):.2f} (SD={np.std(vals, ddof=1):.2f})")
+            ax.plot(x_grid, y_kde, color=color, lw=2.3, label=f"Mean={np.mean(vals):.1f} (SD={np.std(vals, ddof=1):.1f})")
             ax.fill_between(x_grid, 0, y_kde, color=color, alpha=0.14)
 
         mean_v = float(np.mean(vals))
         med_v = float(np.median(vals))
         ax.axvline(mean_v, color=color, ls="-", lw=1.6)
-        ax.axvline(med_v, color="#333333", ls="--", lw=1.4, label=f"Median = {med_v:.2f}")
+        ax.axvline(med_v, color="#333333", ls="--", lw=1.4, label=f"Median = {med_v:.1f}")
         ax.axvspan(0.0, 1.5, color="#f8d7da", alpha=0.16, zorder=0)
         ax.axvspan(2.0, 3.0, color="#d4edda", alpha=0.16, zorder=0)
 
         ax.set_xlim(0.0, 3.0)
+        ax.xaxis.set_major_formatter( matplotlib.ticker.FormatStrFormatter('%.1f') )
+        ax.yaxis.set_major_formatter( matplotlib.ticker.FormatStrFormatter('%.1f') )
         ax.set_title(f"({chr(65+idx)}) {tax_name} (N={len(vals)})", fontsize=10, fontweight="bold")
         ax.set_xlabel("Certainty-Weighted Safety Index (0–3)", fontsize=8.8)
         if idx == 0:
             ax.set_ylabel("Density", fontsize=9, fontweight="bold")
-        ax.legend(loc="upper right", fontsize=7.5, frameon=True, facecolor="white", framealpha=0.9)
+        ax.legend(loc="upper right", fontsize=7.8, frameon=True, facecolor="white", framealpha=0.9)
         ax.grid(axis="y", ls=":", alpha=0.4)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
@@ -279,7 +341,7 @@ def plot_combined_overall_density(df_all: pd.DataFrame):
 
 
 def plot_paneled_industry_density(df_tax: pd.DataFrame, tax_name: str, slug: str):
-    """Produces a 2x3 paneled kernel density + histogram plot by industry for a given taxonomy."""
+    """Produces a 2x3 paneled kernel density + histogram plot by industry (1-decimal labels)."""
     fig, axes = plt.subplots(2, 3, figsize=(12.5, 6.2), dpi=300, sharex=True, sharey=False)
     axes_flat = axes.flatten()
     x_grid = np.linspace(0.0, 3.0, 300)
@@ -303,17 +365,19 @@ def plot_paneled_industry_density(df_tax: pd.DataFrame, tax_name: str, slug: str
         sd_v = float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0
         med_v = float(np.median(vals)) if len(vals) > 0 else np.nan
 
-        ax.axvline(mean_v, color=color, ls="-", lw=1.7, label=f"Ind. Mean: {mean_v:.2f} (SD: {sd_v:.2f})")
-        ax.axvline(med_v, color="#222222", ls=":", lw=1.4, label=f"Ind. Median: {med_v:.2f}")
-        ax.axvline(overall_mean, color="#777777", ls="--", lw=1.1, alpha=0.8, label=f"Tax. Mean: {overall_mean:.2f}")
+        ax.axvline(mean_v, color=color, ls="-", lw=1.7, label=f"Ind. Mean: {mean_v:.1f} (SD: {sd_v:.1f})")
+        ax.axvline(med_v, color="#222222", ls=":", lw=1.4, label=f"Ind. Median: {med_v:.1f}")
+        ax.axvline(overall_mean, color="#777777", ls="--", lw=1.1, alpha=0.8, label=f"Tax. Mean: {overall_mean:.1f}")
 
         ax.set_xlim(0.0, 3.0)
+        ax.xaxis.set_major_formatter( matplotlib.ticker.FormatStrFormatter('%.1f') )
+        ax.yaxis.set_major_formatter( matplotlib.ticker.FormatStrFormatter('%.1f') )
         ax.set_title(f"{short_lbl} (N={len(vals)})", fontsize=9.2, fontweight="bold")
         if idx >= 3:
             ax.set_xlabel("Certainty-Weighted Safety Index (0–3)", fontsize=8.5)
         if idx % 3 == 0:
             ax.set_ylabel("Density", fontsize=8.5, fontweight="bold")
-        ax.legend(loc="upper left" if mean_v > 1.6 else "upper right", fontsize=7, frameon=True, facecolor="white", framealpha=0.88)
+        ax.legend(loc="upper left" if mean_v > 1.6 else "upper right", fontsize=7.2, frameon=True, facecolor="white", framealpha=0.88)
         ax.grid(axis="y", ls=":", alpha=0.4)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
@@ -326,7 +390,7 @@ def plot_paneled_industry_density(df_tax: pd.DataFrame, tax_name: str, slug: str
 
 
 def analyze_spot_verification(df_main: pd.DataFrame, df_spot: pd.DataFrame) -> Dict[str, Any]:
-    """Compares primary scoring pass vs. independent spot-verification pass on random subsample."""
+    """Compares primary scoring pass vs. independent spot-verification pass (rounded to 1 decimal place)."""
     merged = df_spot.merge(df_main, on="item_id", suffixes=("_spot", "_main"))
     out: Dict[str, Any] = {"overall": {}, "by_taxonomy": {}, "examples": []}
 
@@ -347,8 +411,8 @@ def analyze_spot_verification(df_main: pd.DataFrame, df_spot: pd.DataFrame) -> D
 
         return {
             "n_subsample": int(len(sub)),
-            "index_pearson_r": round(r_cw, 4),
-            "index_mae": round(mae_cw, 4),
+            "index_pearson_r": round(r_cw, 1),
+            "index_mae": round(mae_cw, 1),
             "gate_agreement_pct": round(100.0 * gate_agree, 1),
             "mean_dim_exact_agreement_pct": round(100.0 * float(np.mean(exact_agrees)), 1),
             "mean_dim_within_1_agreement_pct": round(100.0 * float(np.mean(adj_agrees)), 1),
@@ -367,9 +431,9 @@ def analyze_spot_verification(df_main: pd.DataFrame, df_spot: pd.DataFrame) -> D
                     "occupation": r["occupation_main"],
                     "industry": r["industry_main"],
                     "statement": str(r["statement_main"])[:110] + ("..." if len(str(r["statement_main"])) > 110 else ""),
-                    "main_cw": round(float(r["safety_index_cw_main"]), 2),
-                    "spot_cw": round(float(r["safety_index_cw_spot"]), 2),
-                    "main_cert": round(float(r["mean_certainty_main"]), 2),
+                    "main_cw": round(float(r["safety_index_cw_main"]), 1),
+                    "spot_cw": round(float(r["safety_index_cw_spot"]), 1),
+                    "main_cert": round(float(r["mean_certainty_main"]), 1),
                     "dims_main": [int(r[f"{d}_score_main"]) for d in DIMS],
                     "dims_spot": [int(r[f"{d}_score_spot"]) for d in DIMS],
                 })
@@ -377,13 +441,31 @@ def analyze_spot_verification(df_main: pd.DataFrame, df_spot: pd.DataFrame) -> D
     return out
 
 
+def round_scored_csvs():
+    """Rounds all floating-point columns in the scored CSV outputs to 1 decimal place."""
+    for fname in ["scored_items_all_taxonomies.csv", "spot_verification_subsample.csv"]:
+        fpath = os.path.join(OUT_DIR, fname)
+        if os.path.exists(fpath):
+            df = pd.read_csv(fpath)
+            float_cols = df.select_dtypes(include=["float64", "float32"]).columns
+            for col in float_cols:
+                df[col] = df[col].round(1)
+            df.to_csv(fpath, index=False)
+
+
 def main():
-    df_all = pd.read_csv(os.path.join(OUT_DIR, "scored_items_all_taxonomies.csv"))
-    df_spot = pd.read_csv(os.path.join(OUT_DIR, "spot_verification_subsample.csv"))
+    # Recompute exact index from raw JSONL before rounding so plots use underlying scores and display 1-decimal labels
+    main_jsonl = os.path.join(OUT_DIR, "scored_items_main.jsonl")
+    spot_jsonl = os.path.join(OUT_DIR, "spot_verification_subsample.jsonl")
+    with open(main_jsonl, "r", encoding="utf-8") as f:
+        df_all = pd.DataFrame([json.loads(line) for line in f if line.strip()])
+    with open(spot_jsonl, "r", encoding="utf-8") as f:
+        df_spot = pd.DataFrame([json.loads(line) for line in f if line.strip()])
 
     all_artifacts_summary: Dict[str, Any] = {
         "taxonomies": {},
         "spot_verification": {},
+        "bimodality_forensics": [],
     }
 
     plot_combined_overall_density(df_all)
@@ -393,15 +475,12 @@ def main():
         color = TAX_COLORS[tax_name]
         df_tax = df_all[df_all["taxonomy"] == tax_name].copy()
 
-        # 1. Summary statistics overall & by industry
         sum_df = compute_summary_stats(df_tax)
         sum_df.to_csv(os.path.join(OUT_DIR, f"summary_stats_{slug}.csv"), index=False)
 
-        # 2. Cronbach's alpha + leave-one-out
         rel_info = compute_reliability_table(df_tax)
         pd.DataFrame(rel_info["leave_one_out"]).to_csv(os.path.join(OUT_DIR, f"cronbach_loo_{slug}.csv"), index=False)
 
-        # 3. Plots (overall density + paneled density by industry)
         plot_overall_density(df_tax, tax_name, slug, color)
         plot_paneled_industry_density(df_tax, tax_name, slug)
 
@@ -410,22 +489,25 @@ def main():
             "reliability": rel_info,
         }
 
-    # 4. Spot verification
     spot_res = analyze_spot_verification(df_all, df_spot)
     all_artifacts_summary["spot_verification"] = spot_res
+    all_artifacts_summary["bimodality_forensics"] = compute_bimodality_forensics(df_all)
+
+    # Save 1-decimal rounded CSVs
+    df_all_out = df_all.copy()
+    for col in df_all_out.select_dtypes(include=["float64", "float32"]).columns:
+        df_all_out[col] = df_all_out[col].round(1)
+    df_all_out.to_csv(os.path.join(OUT_DIR, "scored_items_all_taxonomies.csv"), index=False)
+
+    df_spot_out = df_spot.copy()
+    for col in df_spot_out.select_dtypes(include=["float64", "float32"]).columns:
+        df_spot_out[col] = df_spot_out[col].round(1)
+    df_spot_out.to_csv(os.path.join(OUT_DIR, "spot_verification_subsample.csv"), index=False)
 
     with open(os.path.join(OUT_DIR, "analysis_summary.json"), "w", encoding="utf-8") as f:
         json.dump(all_artifacts_summary, f, indent=2)
 
-    print("Successfully generated all tables, reliability diagnostics, and density plots!")
-    for tax_name in TAXONOMIES:
-        rel = all_artifacts_summary["taxonomies"][tax_name]["reliability"]
-        ov = all_artifacts_summary["taxonomies"][tax_name]["summary_stats"][0]
-        print(f"=== {tax_name} (N={ov['N']}) ===")
-        print(f"  Overall CW Safety Index: Mean={ov['Mean_CW']:.3f}, SD={ov['SD_CW']:.3f}, Median={ov['Median_CW']:.3f}, IQR={ov['IQR_CW']:.3f}, Certainty={ov['Mean_Certainty']:.3f}")
-        print(f"  Cronbach's Alpha (CW): {rel['alpha_cw']:.4f} (Raw: {rel['alpha_raw']:.4f}) | Below 0.7: {rel['below_0_7_threshold']}")
-        for r in rel["leave_one_out"]:
-            print(f"    - LOO without {r['item']} ({r['label']}): alpha_cw={r['alpha_if_deleted_cw']:.4f} (delta={r['delta_alpha_cw']:+.4f}, r_rest={r['item_rest_corr']:.3f})")
+    print("Successfully generated all 1-decimal tables, reliability diagnostics, bimodality forensics, and density plots!")
 
 
 if __name__ == "__main__":

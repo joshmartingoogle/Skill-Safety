@@ -1,0 +1,13 @@
+Taxonomy,Stage,N,Mean_CW,SD_CW,Median_CW,Sarle_BC,Exact_Zero_Pct,Low_Mode_Lt_0_5_Pct,Mid_0_5_to_1_5_Pct,High_Mode_Ge_1_5_Pct
+Stanford TaskNet,Stage 0: Raw Pipeline (All Items),202,1.2,0.9,1.5,0.6,17.3,31.7,19.3,49.0
+Stanford TaskNet,Stage 1: + Gate Filter (AI-Assistable Only),159,1.4,0.8,1.7,0.6,11.9,23.3,15.7,61.0
+Stanford TaskNet,Stage 2: + Relevance / Core Cleaning,143,1.4,0.9,1.7,0.6,13.3,25.9,17.5,56.6
+Stanford TaskNet,Stage 3: + Excl. EM Zero-Floor Halo,114,1.6,0.7,1.7,0.6,2.6,15.8,20.2,64.0
+O*NET Tasks,Stage 0: Raw Pipeline (All Items),118,1.2,0.9,1.2,0.6,18.6,36.4,17.8,45.8
+O*NET Tasks,Stage 1: + Gate Filter (AI-Assistable Only),94,1.3,0.9,1.6,0.6,14.9,29.8,17.0,53.2
+O*NET Tasks,Stage 2: + Relevance / Core Cleaning,78,1.3,0.9,1.6,0.6,15.4,32.1,16.7,51.3
+O*NET Tasks,Stage 3: + Excl. EM Zero-Floor Halo,64,1.5,0.8,1.6,0.5,3.1,18.8,20.3,60.9
+O*NET Skills,Stage 0: Raw Pipeline (All Items),210,1.3,1.1,1.2,0.7,13.8,38.6,16.2,45.2
+O*NET Skills,Stage 1: + Gate Filter (AI-Assistable Only),172,1.4,1.0,1.6,0.6,9.3,31.4,17.4,51.2
+O*NET Skills,Stage 2: + Relevance / Core Cleaning,119,1.1,0.9,1.0,0.6,12.6,42.0,19.3,38.7
+O*NET Skills,Stage 3: + Excl. EM Zero-Floor Halo,98,1.3,0.8,1.2,0.6,3.1,33.7,22.4,43.9

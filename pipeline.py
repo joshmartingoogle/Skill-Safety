@@ -324,12 +324,12 @@ def score_single_item(item: Dict[str, Any], pass_label: str = "main", temp: floa
             cw_need = float(np.sum(scores_arr[:5] * certs_arr[:5]) / np.sum(certs_arr[:5]))
             mean_cert = float(np.mean(certs_arr))
 
-            out_row["safety_index_cw"] = round(cw_index, 4)
-            out_row["safety_index_cw_norm"] = round(cw_index / 3.0, 4)
-            out_row["safety_index_uw"] = round(uw_index, 4)
-            out_row["need_safety_cw"] = round(cw_need, 4)
+            out_row["safety_index_cw"] = round(cw_index, 1)
+            out_row["safety_index_cw_norm"] = round(cw_index / 3.0, 1)
+            out_row["safety_index_uw"] = round(uw_index, 1)
+            out_row["need_safety_cw"] = round(cw_need, 1)
             out_row["stakes_safety"] = int(scores_arr[5])
-            out_row["mean_certainty"] = round(mean_cert, 4)
+            out_row["mean_certainty"] = round(mean_cert, 1)
             return out_row
 
         except Exception as e:
