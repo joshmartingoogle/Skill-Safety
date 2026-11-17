@@ -1,0 +1,7 @@
+item,label,item_mean_cw,item_sd_cw,item_mean_raw,mean_certainty,item_rest_corr,alpha_if_deleted_cw,delta_alpha_cw,alpha_if_deleted_raw,delta_alpha_raw,reduces_reliability
+N1,N1: Fallback Safety,1.83,1.387,1.817,0.928,0.782,0.8321,-0.0407,0.8313,-0.0405,False
+N2,N2: Live Performance Safety,1.675,1.515,1.609,0.952,0.776,0.8377,-0.0351,0.8336,-0.0382,False
+N3,N3: No-AI Rules Safety,1.357,1.257,1.406,0.882,0.833,0.8209,-0.0519,0.819,-0.0528,False
+N4,N4: Checking Safety,0.923,0.816,0.931,0.901,0.73,0.8505,-0.0223,0.8484,-0.0234,False
+N5,N5: Foundation Safety,0.662,0.819,0.708,0.897,0.543,0.8726,-0.0002,0.8727,0.0009,False
+S,S: Stakes Safety,0.988,0.863,0.985,0.931,0.501,0.8772,0.0044,0.8783,0.0065,True
